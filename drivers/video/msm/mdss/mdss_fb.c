@@ -798,6 +798,9 @@ static ssize_t mdss_set_rgb(struct device *dev,
 	struct mdp_pcc_cfg_data pcc_cfg;
 	u32 copyback = 0;
 
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)fbi->par;
+
 	if (count > 19)
 		return -EINVAL;
 
@@ -824,7 +827,7 @@ static ssize_t mdss_set_rgb(struct device *dev,
 	pcc_cfg.g.g = g;
 	pcc_cfg.b.b = b;
 
-	if (mdss_mdp_pcc_config(&pcc_cfg, &copyback) == 0) {
+	if (mdss_mdp_pcc_config(mfd, &pcc_cfg, &copyback) == 0) {
 		pcc_r = r;
 		pcc_g = g;
 		pcc_b = b;
