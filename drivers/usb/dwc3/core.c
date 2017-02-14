@@ -698,6 +698,7 @@ static void dwc3_core_exit_mode(struct dwc3 *dwc)
 void dwc3_post_host_reset_core_init(struct dwc3 *dwc)
 {
 	dwc3_core_init(dwc);
+	dwc3_event_buffers_setup(dwc);
 	dwc3_gadget_restart(dwc);
 	dwc3_notify_event(dwc, DWC3_CONTROLLER_POST_INITIALIZATION_EVENT);
 }
@@ -777,6 +778,7 @@ static int dwc3_probe(struct platform_device *pdev)
 	u8			lpm_nyet_threshold;
 	u8			hird_threshold;
 	u32			num_evt_buffs;
+	int			irq;
 
 	int			ret;
 
@@ -801,6 +803,17 @@ static int dwc3_probe(struct platform_device *pdev)
 	dwc->xhci_resources[1].end = res->end;
 	dwc->xhci_resources[1].flags = res->flags;
 	dwc->xhci_resources[1].name = res->name;
+
+	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
+	ret = devm_request_irq(dev, irq, dwc3_interrupt, IRQF_SHARED, "dwc3",
+			dwc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to request irq #%d --> %d\n",
+				irq, ret);
+		return -ENODEV;
+	}
+
+	dwc->irq = irq;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {

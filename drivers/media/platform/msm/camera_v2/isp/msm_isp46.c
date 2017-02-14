@@ -922,7 +922,7 @@ static int msm_vfe46_start_fetch_engine(struct vfe_device *vfe_dev,
 		rc = vfe_dev->buf_mgr->ops->get_buf_by_index(
 			vfe_dev->buf_mgr, bufq_handle, fe_cfg->buf_idx, &buf);
 		if (rc < 0 || !buf) {
-			pr_err("%s: No fetch buffer rc= %d buf= %p\n",
+			pr_err("%s: No fetch buffer rc= %d buf= %pK\n",
 				__func__, rc, buf);
 			return -EINVAL;
 		}
@@ -1258,8 +1258,7 @@ static void msm_vfe46_update_camif_state(struct vfe_device *vfe_dev,
 	} else if (update_state == DISABLE_CAMIF ||
 		DISABLE_CAMIF_IMMEDIATELY == update_state) {
 		vfe_dev->irq1_mask &= ~0x81;
-		msm_vfe46_config_irq(vfe_dev, vfe_dev->irq0_mask,
-			vfe_dev->irq1_mask, MSM_ISP_IRQ_SET);
+		msm_vfe46_config_irq(vfe_dev, 0, 0, MSM_ISP_IRQ_SET);
 		/* disable danger signal */
 		val = msm_camera_io_r(vfe_dev->vfe_base + 0xC18);
 		val &= ~(1 << 8);
@@ -1270,6 +1269,11 @@ static void msm_vfe46_update_camif_state(struct vfe_device *vfe_dev,
 		/* testgen OFF*/
 		if (vfe_dev->axi_data.src_info[VFE_PIX_0].input_mux == TESTGEN)
 			msm_camera_io_w(1 << 1, vfe_dev->vfe_base + 0xAF4);
+		msm_camera_io_w(0, vfe_dev->vfe_base + 0x64);
+		msm_camera_io_w((1 << 0), vfe_dev->vfe_base + 0x68);
+		msm_camera_io_w_mb(1, vfe_dev->vfe_base + 0x58);
+		msm_vfe46_config_irq(vfe_dev, vfe_dev->irq0_mask,
+				vfe_dev->irq1_mask, MSM_ISP_IRQ_SET);
 	}
 }
 
@@ -2069,7 +2073,7 @@ static struct msm_vfe_axi_hardware_info msm_vfe46_axi_hw_info = {
 	.num_rdi = 3,
 	.num_rdi_master = 3,
 	.min_wm_ub = 96,
-	.scratch_buf_range = SZ_32M,
+	.scratch_buf_range = SZ_32M + SZ_4M,
 };
 
 static struct msm_vfe_stats_hardware_info msm_vfe46_stats_hw_info = {

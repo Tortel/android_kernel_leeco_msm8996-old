@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,7 +19,7 @@ static int add_element(struct mhi_ring *ring, void **rp,
 	uintptr_t d_wp = 0, d_rp = 0, ring_size = 0;
 	int r;
 
-	if (0 == ring->el_size || NULL == ring
+	if (NULL == ring || 0 == ring->el_size
 		|| NULL == ring->base || 0 == ring->len) {
 		mhi_log(MHI_MSG_ERROR, "Bad input parameters, quitting.\n");
 		return -EINVAL;
@@ -48,6 +48,9 @@ static int add_element(struct mhi_ring *ring, void **rp,
 		*assigned_addr = (char *)ring->wp;
 	*wp = (void *)(((d_wp + 1) % ring_size) * ring->el_size +
 						(uintptr_t)ring->base);
+
+	/* force update visible to other cores */
+	smp_wmb();
 	return 0;
 }
 
@@ -77,7 +80,7 @@ int delete_element(struct mhi_ring *ring, void **rp,
 	uintptr_t d_wp = 0, d_rp = 0, ring_size = 0;
 	int r;
 
-	if (0 == ring->el_size || NULL == ring ||
+	if (NULL == ring || 0 == ring->el_size ||
 		NULL == ring->base || 0 == ring->len)
 		return -EINVAL;
 
@@ -101,6 +104,9 @@ int delete_element(struct mhi_ring *ring, void **rp,
 
 	*rp = (void *)(((d_rp + 1) % ring_size) * ring->el_size +
 						(uintptr_t)ring->base);
+
+	/* force update visible to other cores */
+	smp_wmb();
 	return 0;
 }
 
@@ -108,6 +114,7 @@ int mhi_get_free_desc(struct mhi_client_handle *client_handle)
 {
 	u32 chan;
 	struct mhi_device_ctxt *ctxt;
+	int bb_ring, ch_ring;
 
 	if (!client_handle || MHI_HANDLE_MAGIC != client_handle->magic ||
 	    !client_handle->mhi_dev_ctxt)
@@ -115,7 +122,10 @@ int mhi_get_free_desc(struct mhi_client_handle *client_handle)
 	ctxt = client_handle->mhi_dev_ctxt;
 	chan = client_handle->chan_info.chan_nr;
 
-	return get_nr_avail_ring_elements(&ctxt->mhi_local_chan_ctxt[chan]);
+	bb_ring = get_nr_avail_ring_elements(&ctxt->chan_bb_list[chan]);
+	ch_ring = get_nr_avail_ring_elements(&ctxt->mhi_local_chan_ctxt[chan]);
+
+	return min(bb_ring, ch_ring);
 }
 EXPORT_SYMBOL(mhi_get_free_desc);
 
@@ -123,11 +133,11 @@ int get_nr_avail_ring_elements(struct mhi_ring *ring)
 {
 	u32 nr_el = 0;
 	uintptr_t ring_size = 0;
-	enum MHI_STATUS ret_val = MHI_STATUS_SUCCESS;
+	int ret_val = 0;
 
 	ring_size = ring->len / ring->el_size;
 	ret_val = get_nr_enclosed_el(ring, ring->rp, ring->wp, &nr_el);
-	if (ret_val != MHI_STATUS_SUCCESS) {
+	if (ret_val != 0) {
 		mhi_log(MHI_MSG_ERROR,
 			"Failed to get enclosed el ret %d.\n", ret_val);
 		return 0;
@@ -135,26 +145,28 @@ int get_nr_avail_ring_elements(struct mhi_ring *ring)
 	return ring_size - nr_el - 1;
 }
 
-enum MHI_STATUS get_nr_enclosed_el(struct mhi_ring *ring, void *rp,
+int get_nr_enclosed_el(struct mhi_ring *ring, void *rp,
 						void *wp, u32 *nr_el)
 {
 	uintptr_t index_rp = 0;
 	uintptr_t index_wp = 0;
 	uintptr_t ring_size = 0;
+	int r = 0;
 
-	if (0 == ring->el_size || NULL == ring ||
+	if (NULL == ring || 0 == ring->el_size ||
 		NULL == ring->base || 0 == ring->len) {
 		mhi_log(MHI_MSG_ERROR, "Bad input parameters, quitting.\n");
-		return MHI_STATUS_ERROR;
+		return -EINVAL;
 	}
-	if (MHI_STATUS_SUCCESS != get_element_index(ring, rp, &index_rp)) {
+	r = get_element_index(ring, rp, &index_rp);
+	if (r) {
 		mhi_log(MHI_MSG_CRITICAL, "Bad element index rp 0x%p.\n", rp);
-		return MHI_STATUS_ERROR;
+		return r;
 	}
-
-	if (MHI_STATUS_SUCCESS != get_element_index(ring, wp, &index_wp)) {
+	r = get_element_index(ring, wp, &index_wp);
+	if (r) {
 		mhi_log(MHI_MSG_CRITICAL, "Bad element index wp 0x%p.\n", wp);
-		return MHI_STATUS_ERROR;
+		return r;
 	}
 	ring_size = ring->len / ring->el_size;
 
@@ -164,7 +176,7 @@ enum MHI_STATUS get_nr_enclosed_el(struct mhi_ring *ring, void *rp,
 		*nr_el = ring_size - (index_rp - index_wp);
 	else
 		*nr_el = 0;
-	return MHI_STATUS_SUCCESS;
+	return 0;
 }
 
 int get_element_index(struct mhi_ring *ring,
@@ -178,15 +190,15 @@ int get_element_index(struct mhi_ring *ring,
 	return r;
 }
 
-enum MHI_STATUS get_element_addr(struct mhi_ring *ring,
+int get_element_addr(struct mhi_ring *ring,
 				uintptr_t index, void **address)
 {
 	uintptr_t ring_size = 0;
 
 	if (NULL == ring || NULL == address)
-		return MHI_STATUS_ERROR;
+		return -EINVAL;
 	ring_size = ring->len / ring->el_size;
 	*address = (void *)((uintptr_t)ring->base +
 			(index % ring_size) * ring->el_size);
-	return MHI_STATUS_SUCCESS;
+	return 0;
 }

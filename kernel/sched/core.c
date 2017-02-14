@@ -85,6 +85,9 @@
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
 #endif
+#ifdef CONFIG_MSM_APP_SETTINGS
+#include <asm/app_api.h>
+#endif
 
 #include "sched.h"
 #include "../workqueue_internal.h"
@@ -4721,6 +4724,14 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
 	fire_sched_out_preempt_notifiers(prev, next);
 	prepare_lock_switch(rq, next);
 	prepare_arch_switch(next);
+
+#ifdef CONFIG_MSM_APP_SETTINGS
+	if (use_app_setting)
+		switch_app_setting_bit(prev, next);
+
+	if (use_32bit_app_setting)
+		switch_32bit_app_setting_bit(prev, next);
+#endif
 }
 
 /**
@@ -5236,7 +5247,8 @@ static noinline void __schedule_bug(struct task_struct *prev)
 static inline void schedule_debug(struct task_struct *prev)
 {
 #ifdef CONFIG_SCHED_STACK_END_CHECK
-	BUG_ON(unlikely(task_stack_end_corrupted(prev)));
+	if (unlikely(task_stack_end_corrupted(prev)))
+		panic("corrupted stack end detected inside scheduler\n");
 #endif
 	/*
 	 * Test if we are atomic. Since do_exit() needs to call into

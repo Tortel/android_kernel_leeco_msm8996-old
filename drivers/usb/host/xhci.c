@@ -35,8 +35,6 @@
 #define DRIVER_AUTHOR "Sarah Sharp"
 #define DRIVER_DESC "'eXtensible' Host Controller (xHC) Driver"
 
-#define XHCI_INT_MODERATION_VAL 4000
-
 #define	PORT_WAKE_BITS	(PORT_WKOC_E | PORT_WKDISC_E | PORT_WKCONN_E)
 
 /* Some 0.95 hardware can't handle the chain bit on a Link TRB being cleared */
@@ -117,17 +115,20 @@ int xhci_halt(struct xhci_hcd *xhci)
 			STS_HALT, STS_HALT, XHCI_MAX_HALT_USEC);
 	if (!ret) {
 		xhci->xhc_state |= XHCI_STATE_HALTED;
-		xhci->cmd_ring_state = CMD_RING_STATE_STOPPED;
-
-		if (timer_pending(&xhci->cmd_timer)) {
-			xhci_dbg_trace(xhci, trace_xhci_dbg_init,
-					"Cleanup command queue");
-			del_timer(&xhci->cmd_timer);
-			xhci_cleanup_command_queue(xhci);
-		}
-	} else
+	} else {
 		xhci_warn(xhci, "Host not halted after %u microseconds.\n",
 				XHCI_MAX_HALT_USEC);
+	}
+
+	xhci->cmd_ring_state = CMD_RING_STATE_STOPPED;
+
+	if (timer_pending(&xhci->cmd_timer)) {
+		xhci_dbg_trace(xhci, trace_xhci_dbg_init,
+				"Cleanup command queue");
+		del_timer(&xhci->cmd_timer);
+		xhci_cleanup_command_queue(xhci);
+	}
+
 	return ret;
 }
 
@@ -642,7 +643,7 @@ int xhci_run(struct usb_hcd *hcd)
 			"// Set the interrupt modulation register");
 	temp = readl(&xhci->ir_set->irq_control);
 	temp &= ~ER_IRQ_INTERVAL_MASK;
-	temp |= (u32) XHCI_INT_MODERATION_VAL;
+	temp |= (u32) 160;
 	writel(temp, &xhci->ir_set->irq_control);
 
 	/* Set the HCD state before we enable the irqs */

@@ -1520,8 +1520,8 @@ static void msm_vfe40_update_camif_state(struct vfe_device *vfe_dev,
 	} else if (update_state == DISABLE_CAMIF ||
 		DISABLE_CAMIF_IMMEDIATELY == update_state) {
 		vfe_dev->irq1_mask &= ~0x81;
-		msm_vfe40_config_irq(vfe_dev, vfe_dev->irq0_mask, vfe_dev->irq1_mask,
-			MSM_ISP_IRQ_SET);
+		msm_vfe40_config_irq(vfe_dev, 0, 0,
+				MSM_ISP_IRQ_SET);
 		val = msm_camera_io_r(vfe_dev->vfe_base + 0x464);
 		/* disable danger signal */
 		msm_camera_io_w_mb(val & ~(1 << 8), vfe_dev->vfe_base + 0x464);
@@ -1531,6 +1531,12 @@ static void msm_vfe40_update_camif_state(struct vfe_device *vfe_dev,
 		/* testgen OFF*/
 		if (vfe_dev->axi_data.src_info[VFE_PIX_0].input_mux == TESTGEN)
 			msm_camera_io_w(1 << 1, vfe_dev->vfe_base + 0x93C);
+		msm_camera_io_w(0, vfe_dev->vfe_base + 0x30);
+		msm_camera_io_w((1 << 0), vfe_dev->vfe_base + 0x34);
+		msm_camera_io_w_mb(1, vfe_dev->vfe_base + 0x24);
+		msm_vfe40_config_irq(vfe_dev, vfe_dev->irq0_mask,
+				vfe_dev->irq1_mask,
+				MSM_ISP_IRQ_SET);
 	}
 }
 
@@ -2319,7 +2325,7 @@ static struct msm_vfe_axi_hardware_info msm_vfe40_axi_hw_info = {
 	.num_rdi = 3,
 	.num_rdi_master = 3,
 	.min_wm_ub = 64,
-	.scratch_buf_range = SZ_32M,
+	.scratch_buf_range = SZ_32M + SZ_4M,
 };
 
 static struct msm_vfe_stats_hardware_info msm_vfe40_stats_hw_info = {

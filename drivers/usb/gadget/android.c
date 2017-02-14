@@ -682,6 +682,7 @@ static int functionfs_ready_callback(struct ffs_data *ffs)
 
 	mutex_lock(&dev->mutex);
 
+	mutex_lock(&dev->mutex);
 	config->data = ffs;
 	config->opened = true;
 

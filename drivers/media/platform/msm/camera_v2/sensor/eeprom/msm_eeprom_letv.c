@@ -15,6 +15,7 @@
 #include <linux/delay.h>
 #include <linux/crc32.h>
 #include <linux/debugfs.h>
+#include <media/msm_cam_sensor.h>
 #include "msm_sd.h"
 #include "msm_cci.h"
 #include "msm_eeprom_letv.h"

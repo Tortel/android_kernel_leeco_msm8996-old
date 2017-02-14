@@ -1833,7 +1833,7 @@ static int pp_dspp_setup(u32 disp_num, struct mdss_mdp_mixer *mixer)
 	u32 ad_flags, flags, dspp_num, opmode = 0, ad_bypass;
 	struct mdp_pgc_lut_data *pgc_config;
 	struct pp_sts_type *pp_sts;
-	char __iomem *base, *addr;
+	char __iomem *base, *addr = NULL;
 	int ret = 0;
 	struct mdss_data_type *mdata;
 	struct mdss_ad_info *ad = NULL;
@@ -2085,7 +2085,7 @@ error:
 
 int mdss_mdp_pp_setup_locked(struct mdss_mdp_ctl *ctl)
 {
-	struct mdss_data_type *mdata = ctl->mdata;
+	struct mdss_data_type *mdata;
 	int ret = 0, i;
 	u32 flags, pa_v2_flags;
 	u32 max_bw_needed;
@@ -2094,9 +2094,10 @@ int mdss_mdp_pp_setup_locked(struct mdss_mdp_ctl *ctl)
 	u32 disp_num;
 	bool valid_mixers = true;
 	bool valid_ad_panel = true;
-	if ((!ctl) || (!ctl->mfd) || (!mdss_pp_res) || (!mdata))
+	if ((!ctl) || (!ctl->mfd) || (!mdss_pp_res) || (!ctl->mdata))
 		return -EINVAL;
 
+	mdata = ctl->mdata;
 	/* treat fb_num the same as block logical id*/
 	disp_num = ctl->mfd->index;
 
@@ -2442,8 +2443,8 @@ int mdss_mdp_pp_init(struct device *dev)
 	int i, ret = 0;
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	struct mdss_mdp_pipe *vig;
-	struct pp_hist_col_info *hist;
 	void *ret_ptr = NULL;
+	struct pp_hist_col_info *hist = NULL;
 	u32 ctl_off = 0;
 
 	if (!mdata)
@@ -2572,6 +2573,8 @@ int mdss_mdp_pp_overlay_init(struct msm_fb_data_type *mfd)
 		pr_err("Invalid mfd %p mdata %p\n", mfd, mdata);
 		return -EPERM;
 	}
+	if (mfd->index >= (MDP_BLOCK_MAX - MDP_LOGICAL_BLOCK_DISP_0))
+		return 0;
 
 	if (mdata->nad_cfgs)
 		mfd->mdp.ad_calc_bl = pp_ad_calc_bl;
@@ -2643,11 +2646,14 @@ static int pp_ad_calc_bl(struct msm_fb_data_type *mfd, int bl_in, int *bl_out,
 		return ret;
 	}
 
+	/* Don't update BL = 0 to AD */
+	if (bl_in == 0)
+		return 0;
 	mutex_lock(&ad->lock);
 	if (!mfd->ad_bl_level)
 		mfd->ad_bl_level = bl_in;
-	if (!(ad->state & PP_AD_STATE_RUN)) {
-		pr_debug("AD is not running.\n");
+	if (!(ad->sts & PP_STS_ENABLE)) {
+		pr_debug("AD is not enabled.\n");
 		mutex_unlock(&ad->lock);
 		return -EPERM;
 	}
@@ -2670,22 +2676,27 @@ static int pp_ad_calc_bl(struct msm_fb_data_type *mfd, int bl_in, int *bl_out,
 		return ret;
 	}
 
-	ret = pp_ad_attenuate_bl(ad, temp, &temp);
-	if (ret) {
-		pr_err("Failed to attenuate BL: %d\n", ret);
-		mutex_unlock(&ad->lock);
-		return ret;
-	}
-	ad_bl_out = temp;
+	if (ad->init.alpha > 0) {
+		ret = pp_ad_attenuate_bl(ad, temp, &temp);
+		if (ret) {
+			pr_err("Failed to attenuate BL: %d\n", ret);
+			mutex_unlock(&ad->lock);
+			return ret;
+		}
+		ad_bl_out = temp;
 
-	ret = pp_ad_linearize_bl(ad, temp, &temp, MDP_PP_AD_BL_LINEAR_INV);
-	if (ret) {
-		pr_err("Failed to inverse linearize BL: %d\n", ret);
-		mutex_unlock(&ad->lock);
-		return ret;
+		ret = pp_ad_linearize_bl(ad, temp, &temp,
+						MDP_PP_AD_BL_LINEAR_INV);
+		if (ret) {
+			pr_err("Failed to inverse linearize BL: %d\n", ret);
+			mutex_unlock(&ad->lock);
+			return ret;
+		}
+		*bl_out = temp;
+	} else {
+		ad_bl_out = temp;
 	}
 
-	*bl_out = temp;
 	if (pp_ad_bl_threshold_check(ad->init.al_thresh, ad->init.alpha_base,
 					ad->last_bl, ad_bl_out)) {
 		mfd->ad_bl_level = ad_bl_out;
@@ -5382,6 +5393,8 @@ static void pp_ad_input_write(struct mdss_mdp_ad *ad_hw,
 		writel_relaxed(ad->ad_data, base + MDSS_MDP_REG_AD_AL);
 		break;
 	case MDSS_AD_MODE_AUTO_STR:
+		pr_debug("bl_data = %d, ad_data = %d\n", ad->bl_data,
+				ad->ad_data);
 		ad->last_ad_data = ad->ad_data;
 		ad->last_ad_data_valid = true;
 		writel_relaxed(ad->bl_data, base + MDSS_MDP_REG_AD_BL);
@@ -5400,6 +5413,8 @@ static void pp_ad_input_write(struct mdss_mdp_ad *ad_hw,
 			ad->last_ad_data = ad->ad_data;
 			ad->last_ad_data_valid = true;
 		}
+		pr_debug("bl_data = %d, last_ad_data = %d, last_str = %d\n",
+				ad->bl_data, ad->last_ad_data, ad->last_str);
 		writel_relaxed(ad->bl_data, base + MDSS_MDP_REG_AD_BL);
 		writel_relaxed(ad->last_ad_data, base + MDSS_MDP_REG_AD_AL);
 		writel_relaxed(ad->last_str, base + MDSS_MDP_REG_AD_STR_MAN);
@@ -5415,7 +5430,7 @@ static void pp_ad_init_write(struct mdss_mdp_ad *ad_hw, struct mdss_ad_info *ad,
 						struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_data_type *mdata = ctl->mdata;
-	u32 temp;
+	u32 temp, cfg_buf_mode;
 	u32 frame_start, frame_end, procs_start, procs_end, tile_ctrl;
 	u32 num;
 	int side;
@@ -5501,20 +5516,22 @@ static void pp_ad_init_write(struct mdss_mdp_ad *ad_hw, struct mdss_ad_info *ad,
 			}
 			procs_end -= 1;
 			frame_end -= 1;
+			cfg_buf_mode = 0x3;
 		} else {
 			frame_start = 0x0;
 			frame_end = 0xFFFF;
 			procs_start = 0x0;
 			procs_end = 0xFFFF;
 			tile_ctrl = 0x0;
+			cfg_buf_mode = 0x2;
 		}
-
 
 		writel_relaxed(frame_start, base + MDSS_MDP_REG_AD_FRAME_START);
 		writel_relaxed(frame_end, base + MDSS_MDP_REG_AD_FRAME_END);
 		writel_relaxed(procs_start, base + MDSS_MDP_REG_AD_PROCS_START);
 		writel_relaxed(procs_end, base + MDSS_MDP_REG_AD_PROCS_END);
 		writel_relaxed(tile_ctrl, base + MDSS_MDP_REG_AD_TILE_CTRL);
+		writel_relaxed(cfg_buf_mode , base + MDSS_MDP_REG_AD_CFG_BUF);
 	}
 }
 
@@ -5735,6 +5752,8 @@ static int mdss_mdp_ad_setup(struct msm_fb_data_type *mfd)
 		ad->sts &= ~PP_AD_STS_DIRTY_DATA;
 		ad->state |= PP_AD_STATE_DATA;
 		pr_debug("dirty data, last_bl = %d\n", ad->last_bl);
+		if (!bl_mfd->ad_bl_level)
+			bl_mfd->ad_bl_level = bl_mfd->bl_level;
 		bl = bl_mfd->ad_bl_level;
 
 		if (ad->last_bl != bl) {
@@ -5822,6 +5841,7 @@ static int mdss_mdp_ad_setup(struct msm_fb_data_type *mfd)
 			memset(&ad->cfg, 0, sizeof(struct mdss_ad_cfg));
 			bl_mfd->ext_bl_ctrl = 0;
 			bl_mfd->ext_ad_ctrl = -1;
+			bl_mfd->ad_bl_level = 0;
 		}
 		ad->state &= ~PP_AD_STATE_RUN;
 	}
@@ -5896,11 +5916,6 @@ static void pp_ad_calc_worker(struct work_struct *work)
 	if ((PP_AD_STATE_RUN & ad->state) && ad->calc_itr > 0)
 		ad->calc_itr--;
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
-	ad->last_str = 0xFF & readl_relaxed(base + MDSS_MDP_REG_AD_STR_OUT);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
-	if (mdata->ad_debugen)
-		pr_debug("itr number %d str %d\n", ad->calc_itr, ad->last_str);
 	mdp5_data->ad_events++;
 	sysfs_notify_dirent(mdp5_data->ad_event_sd);
 	if (!ad->calc_itr) {
@@ -5908,6 +5923,11 @@ static void pp_ad_calc_worker(struct work_struct *work)
 		ctl->ops.remove_vsync_handler(ctl, &ad->handle);
 	}
 	mutex_unlock(&ad->lock);
+
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
+	ad->last_str = 0xFF & readl_relaxed(base + MDSS_MDP_REG_AD_STR_OUT);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
+	pr_debug("itr number %d str %d\n", ad->calc_itr, ad->last_str);
 }
 
 #define PP_AD_LUT_LEN 33
@@ -5926,7 +5946,7 @@ static void pp_ad_cfg_lut(char __iomem *addr, u32 *data)
 }
 
 /* must call this function from within ad->lock */
-static int  pp_ad_attenuate_bl(struct mdss_ad_info *ad, u32 bl, u32 *bl_out)
+static int pp_ad_attenuate_bl(struct mdss_ad_info *ad, u32 bl, u32 *bl_out)
 {
 	u32 shift = 0, ratio_temp = 0;
 	u32 n, lut_interval, bl_att;
@@ -5993,9 +6013,9 @@ static int pp_ad_linearize_bl(struct mdss_ad_info *ad, u32 bl, u32 *bl_out,
 	}
 
 	pr_debug("bl_in = %d, inv = %d\n", bl, inv);
-	if (inv == MDP_PP_AD_BL_LINEAR_INV) {
+	if (inv == MDP_PP_AD_BL_LINEAR) {
 		bl_lut = ad->bl_lin;
-	} else if (inv == MDP_PP_AD_BL_LINEAR) {
+	} else if (inv == MDP_PP_AD_BL_LINEAR_INV) {
 		bl_lut = ad->bl_lin_inv;
 	} else {
 		pr_err("invalid inv param: inv = %d\n", inv);
@@ -6800,6 +6820,8 @@ int mdss_mdp_copy_layer_pp_info(struct mdp_input_layer *layer)
 			pr_err("Failed to copy IGC payload, ret = %d\n", ret);
 			goto exit_pp_info;
 		}
+	} else {
+		pp_info->igc_cfg.cfg_payload = NULL;
 	}
 	if (ops & MDP_OVERLAY_PP_HIST_LUT_CFG) {
 		ret = pp_copy_layer_hist_lut_payload(pp_info);
@@ -6808,6 +6830,8 @@ int mdss_mdp_copy_layer_pp_info(struct mdp_input_layer *layer)
 				ret);
 			goto exit_igc;
 		}
+	} else {
+		pp_info->hist_lut_cfg.cfg_payload = NULL;
 	}
 	if (ops & MDP_OVERLAY_PP_PA_V2_CFG) {
 		ret = pp_copy_layer_pa_payload(pp_info);
@@ -6815,6 +6839,8 @@ int mdss_mdp_copy_layer_pp_info(struct mdp_input_layer *layer)
 			pr_err("Failed to copy PA payload, ret = %d\n", ret);
 			goto exit_hist_lut;
 		}
+	} else {
+		pp_info->pa_v2_cfg_data.cfg_payload = NULL;
 	}
 	if (ops & MDP_OVERLAY_PP_PCC_CFG) {
 		ret = pp_copy_layer_pcc_payload(pp_info);
@@ -6822,6 +6848,8 @@ int mdss_mdp_copy_layer_pp_info(struct mdp_input_layer *layer)
 			pr_err("Failed to copy PCC payload, ret = %d\n", ret);
 			goto exit_pa;
 		}
+	} else {
+		pp_info->pcc_cfg_data.cfg_payload = NULL;
 	}
 
 	layer->pp_info = pp_info;
@@ -6887,6 +6915,13 @@ static int pp_mfd_release_all(struct msm_fb_data_type *mfd)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	int ret = 0;
+	if (!mfd || !mdata) {
+		pr_err("Invalid mfd %p mdata %p\n", mfd, mdata);
+		return -EPERM;
+	}
+
+	if (mfd->index >= (MDP_BLOCK_MAX - MDP_LOGICAL_BLOCK_DISP_0))
+		return ret;
 
 	if (mdata->nad_cfgs) {
 		ret = pp_mfd_ad_release_all(mfd);
@@ -6935,8 +6970,8 @@ static int pp_mfd_ad_release_all(struct msm_fb_data_type *mfd)
 	ad->mfd = NULL;
 	ad->bl_mfd = NULL;
 	ad->state = 0;
-	cancel_work_sync(&ad->calc_work);
 	mutex_unlock(&ad->lock);
+	cancel_work_sync(&ad->calc_work);
 
 	ctl = mfd_to_ctl(mfd);
 	if (ctl && ctl->ops.remove_vsync_handler)
