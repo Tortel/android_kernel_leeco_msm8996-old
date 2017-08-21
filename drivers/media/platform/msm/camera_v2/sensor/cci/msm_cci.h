@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
-=======
 /* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
->>>>>>> LA.UM.5.5.r1-05400-8x96.0
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
