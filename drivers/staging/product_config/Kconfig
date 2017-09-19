@@ -3,6 +3,12 @@ config SND_SOC_WCD_MBHC_ZL1
 	help
 	  Selects ZL1 specific wcd-mbhc-v2-zl1.c file instead of default wcd-mbhc-v2.c
 
+config LE_CHARGE
+	bool "Enable LeEco Charging"
+	default n
+	---help---
+	  Once selected, LeEco specific charging code will be enabled
+
 config PRODUCT_LE_X2
 	bool "Product set to LE X2"
 	default n

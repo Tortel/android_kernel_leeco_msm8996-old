@@ -335,7 +335,11 @@ module_param_named(
 	battery_type, fg_batt_type, charp, S_IRUSR | S_IWUSR
 );
 
+#ifndef CONFIG_LE_CHARGE
+static int fg_sram_update_period_ms = 30000;
+#else
 static int fg_sram_update_period_ms = 10000;
+#endif
 module_param_named(
 	sram_update_period_ms, fg_sram_update_period_ms, int, S_IRUSR | S_IWUSR
 );
@@ -490,7 +494,9 @@ struct fg_chip {
 	struct fg_irq		mem_irq[FG_MEM_IF_IRQ_COUNT];
 	struct completion	sram_access_granted;
 	struct completion	sram_access_revoked;
+#ifdef CONFIG_LE_CHARGE
 	struct completion	fg_sram_updating_done;
+#endif
 	struct completion	batt_id_avail;
 	struct completion	first_soc_done;
 	struct power_supply	bms_psy;
@@ -1971,11 +1977,15 @@ static void fg_handle_battery_insertion(struct fg_chip *chip)
 
 static int soc_to_setpoint(int soc)
 {
+#ifndef CONFIG_LE_CHARGE
+	return DIV_ROUND_CLOSEST(soc * 255, 100);
+#else
 	/* this function will expand delta soc
 	 * return DIV_ROUND_CLOSEST(soc * 255, 100);
 	 * return original delta soc
 	 */
 	return soc;
+#endif
 }
 
 static void batt_to_setpoint_adc(int vbatt_mv, u8 *data)
@@ -2185,7 +2195,7 @@ static int get_monotonic_soc_raw(struct fg_chip *chip)
 }
 
 #define EMPTY_CAPACITY		0
-#define DEFAULT_CAPACITY	-1	/* reported when profile load is not be finished. */
+#define DEFAULT_CAPACITY	50
 #define MISSING_CAPACITY	100
 #define FULL_CAPACITY		100
 #define FULL_SOC_RAW		0xFF
@@ -2655,26 +2665,6 @@ out:
 	fg_relax(&chip->sanity_wakeup_source);
 }
 
-/*
-  *function for read real-time vbat and ibat from register
-  */
-static int get_real_time_prop_value(struct fg_chip *chip, unsigned int type)
-{
-	int ret = -1;
-
-	cancel_delayed_work(&chip->update_sram_data);
-	reinit_completion(&chip->fg_sram_updating_done);
-	schedule_delayed_work(&chip->update_sram_data,
-		msecs_to_jiffies(0));
-
-	/*make sure we got the latest updated data. and make sure never hold the process too long.*/
-	ret = wait_for_completion_timeout(//never interruptable
-		&chip->fg_sram_updating_done,
-		msecs_to_jiffies(10));
-
-	return fg_data[type].value;
-}
-
 #define SRAM_TIMEOUT_MS			3000
 static void update_sram_data_work(struct work_struct *work)
 {
@@ -2705,7 +2695,9 @@ wait:
 	}
 	rc = update_sram_data(chip, &resched_ms);
 
+#ifdef CONFIG_LE_CHARGE
 	complete(&chip->fg_sram_updating_done); // inform the real time handler, data updating got done.
+#endif
 out:
 	if (!rc)
 		schedule_delayed_work(
@@ -7794,6 +7786,27 @@ static const struct file_operations fg_memif_dfs_reg_fops = {
 	.write		= fg_memif_dfs_reg_write,
 };
 
+#ifdef CONFIG_LE_CHARGE
+/*
+  *function for read real-time vbat and ibat from register
+  */
+static int get_real_time_prop_value(struct fg_chip *chip, unsigned int type)
+{
+	int ret = -1;
+
+	cancel_delayed_work(&chip->update_sram_data);
+	reinit_completion(&chip->fg_sram_updating_done);
+	schedule_delayed_work(&chip->update_sram_data,
+		msecs_to_jiffies(0));
+
+	/*make sure we got the latest updated data. and make sure never hold the process too long.*/
+	ret = wait_for_completion_timeout(//never interruptable
+		&chip->fg_sram_updating_done,
+		msecs_to_jiffies(10));
+
+	return fg_data[type].value;
+}
+
 #define ADDR_OF_FG_REGS_START	0x400
 #define COUNT_OF_ALL_FG_REGS	0x200
 static int fg_regs_open(struct inode *inode, struct file *file)
@@ -7864,6 +7877,7 @@ static const struct file_operations fg_regs_sys_ops = {
 	.read		= fg_memif_dfs_reg_read,
 	.write		= fg_regs_write,
 };
+#endif
 
 /**
  * fg_dfs_create_fs: create debugfs file system.
@@ -7954,6 +7968,7 @@ int fg_dfs_create(struct fg_chip *chip)
 		goto err_remove_fs;
 	}
 
+#ifdef CONFIG_LE_CHARGE
 	/* create interface for dump all fg_regs. */
 	file = debugfs_create_file("fg_regs", S_IRUGO | S_IWUSR, root, chip,
 							&fg_regs_sys_ops);
@@ -7961,6 +7976,7 @@ int fg_dfs_create(struct fg_chip *chip)
 		pr_err("error creating 'fg_regs' entry\n");
 		goto err_remove_fs;
 	}
+#endif
 
 	return 0;
 
@@ -8783,7 +8799,9 @@ static int fg_probe(struct spmi_device *spmi)
 			fg_hard_jeita_alarm_cb);
 	init_completion(&chip->sram_access_granted);
 	init_completion(&chip->sram_access_revoked);
+#ifdef CONFIG_LE_CHARGE
 	init_completion(&chip->fg_sram_updating_done);
+#endif
 	complete_all(&chip->sram_access_revoked);
 	init_completion(&chip->batt_id_avail);
 	init_completion(&chip->first_soc_done);
