@@ -238,7 +238,7 @@ struct dwc3_msm {
 	struct delayed_work	float_chgtype_work;
 	struct qpnp_vadc_chip	*vadc_dev;
 	struct qpnp_vadc_chip	*usb_tm_dev;
-	u8			dcd_retries
+	u8			dcd_retries;
 #endif
 	unsigned long		inputs;
 	enum dwc3_chg_type	chg_type;

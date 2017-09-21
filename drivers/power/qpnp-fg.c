@@ -720,6 +720,10 @@ static char *fg_supplicants[] = {
 	"fg_adc"
 };
 
+#ifdef CONFIG_LE_CHARGE
+static int get_real_time_prop_value(struct fg_chip *chip, unsigned int type);
+#endif
+
 #define DEBUG_PRINT_BUFFER_SIZE 64
 static void fill_string(char *str, size_t str_len, u8 *buf, int buf_len)
 {
@@ -4507,11 +4511,19 @@ static int fg_power_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CHARGE_NOW_ERROR:
 		val->intval = get_sram_prop_now(chip, FG_DATA_VINT_ERR);
 		break;
+#ifndef CONFIG_LE_CHARGE
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		val->intval = get_sram_prop_now(chip, FG_DATA_CURRENT);
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		val->intval = get_sram_prop_now(chip, FG_DATA_VOLTAGE);
+#else
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		val->intval = get_real_time_prop_value(chip, FG_DATA_CURRENT);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		val->intval = get_real_time_prop_value(chip, FG_DATA_VOLTAGE);
+#endif
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
 		val->intval = get_sram_prop_now(chip, FG_DATA_OCV);

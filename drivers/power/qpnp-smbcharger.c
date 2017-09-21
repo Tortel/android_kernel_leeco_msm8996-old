@@ -604,7 +604,6 @@ static int pd_init_voltage = 0;
 static int pd_init_flag = 0;
 static int new_pd_vol = 0;
 static int pre_pd_vol = 0;
-static int le_pd_type_flag = 0;
 static bool ignore_otgidpin = false;
 
 static bool hvdcp_aicl_rerun = false;
@@ -3432,17 +3431,17 @@ static int smbchg_system_temp_level_set(struct smbchg_chip *chip,
 		vote(chip->usb_icl_votable, THERMAL_ICL_VOTER, false,0);
 
 	} else {
-			thermal_fcc_ma = (int)chip->thermal_mitigation[chip->therm_lvl_sel];
+			thermal_icl_ma = (int)chip->thermal_mitigation[chip->therm_lvl_sel];
 			//disable usb icl limit for normal scn
 			vote(chip->usb_icl_votable, THERMAL_ICL_VOTER, false,0);
 
 			pr_info("temp lvl: %d,fcc ma:%d\n",
-				chip->therm_lvl_sel,thermal_fcc_ma);
+				chip->therm_lvl_sel,thermal_icl_ma);
 		rc = vote(chip->fcc_votable, THERMAL_FCC_VOTER, true,
-					thermal_fcc_ma);
+					thermal_icl_ma);
 		if (rc < 0)
 			pr_err("Couldn't vote for thermal FCC rc=%d\n", rc);
-		pr_smb(PR_STATUS, "thermal limit fcc to %d\n", thermal_fcc_ma);
+		pr_smb(PR_STATUS, "thermal limit fcc to %d\n", thermal_icl_ma);
 	}
 	mutex_unlock(&chip->therm_lvl_lock);
 	return rc;
@@ -4439,10 +4438,12 @@ static void smbchg_external_power_changed(struct power_supply *psy)
 {
 	struct smbchg_chip *chip = container_of(psy,
 				struct smbchg_chip, batt_psy);
-	union power_supply_propval prop = {0,};
 	int rc, current_limit = 0, soc;
 	enum power_supply_type usb_supply_type;
 	char *usb_type_name = "null";
+#ifdef CONFIG_LE_CHARGE
+	union power_supply_propval prop = {0,};
+#endif
 
 	if (chip->bms_psy_name)
 		chip->bms_psy =
